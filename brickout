@@ -1,0 +1,309 @@
+#!/bin/bash
+
+
+###############################################################################
+# Helpers
+function p { printf "$@"; }
+function sadd { # append $2=str to $1=LHS
+  v=$1
+  shift
+  IFS=''
+  eval $v=\${$v}'$*'
+  unset IFS
+}
+function range { eval echo {$((${2:+$1}+0))..$((${2:-$1-1}))}; }
+#
+###############################################################################
+
+
+###############################################################################
+# Screen size
+ROWS=0
+COLS=0
+
+function initScreen {
+ local r=$ROWS c=$COLS
+ sttysize=($(stty size)) # ROWS COLUMNS
+ ROWS=${sttysize[0]}
+ COLS=${sttysize[1]}
+ (( r == ROWS && c == COLS )) # return false if screen size updated
+}
+initScreen 
+#
+###############################################################################
+
+
+###############################################################################
+# frame buffer
+emptyfb=()
+emptyfbc=()
+fb=()  # frame buffer new/current (starts off empty, is drawn on)
+fbo=() # frame buffer old/last (what was lat rendered, current state?)
+fbc=() # frame buffer counters
+
+function initfb {
+  eval emptyfb=( $(printf "%.s' ' " $(range 1 $((ROWS * COLS)))) )
+  eval emptyfbc=( $(printf "%.s0 " $(range 1 $((ROWS * COLS)))) )
+}
+initfb
+
+function clearfb {
+  fbo=("${fb[@]}") # Keep track of current framebuffer
+  fb=("${emptyfb[@]}") # new empty framebuffer
+  fbc=("${emptyfbc[@]}")
+}
+clearfb
+
+function fbRender { # Render framebuffer
+  IFS=''
+  printf "\e[H${fb[*]}"
+  unset IFS
+}
+###############################################################################
+
+# running
+sadd sprite[0]  '  o' ' /v' '/ \'
+sadd sprite[1]  '  O' ' /.' '>| '
+sadd sprite[2]  '  O' './ ' '|> '
+sadd sprite[3]  '  o' '</ ' '/ \'
+sadd sprite[4]  '  O' './ ' '>| '
+sadd sprite[5]  '  O' ' /.' '|> '
+
+# jumping
+sadd sprite[6]  '  o' ' /v' ' >\'
+sadd sprite[7]  '   ' '<-O' '/> '
+sadd sprite[8]  '  o' ' /-' '/  '
+sadd sprite[9]  '  O' '_/-' '   '
+sadd sprite[10] '_-O' '  \' '   '
+sadd sprite[11] '--O' '  \' '   '
+sadd sprite[12] '--o' '  \' '   '
+sadd sprite[13] '-\ ' ' |O' '   '
+sadd sprite[14] '-  ' '_\ ' '  O'
+sadd sprite[15] ' | ' ' \ ' ' |o'
+sadd sprite[16] '  |' ' \/' ' o '
+sadd sprite[17] '   ' 'O|/' ' V '
+sadd sprite[18] 'O/ ' ' \ ' '  \'
+sadd sprite[19] ' o ' ' |-' ' | '
+sadd sprite[20] '  O' ' /\' '/> '
+
+# ship
+sadd sprite[21] ' **' '  *' '   '
+sadd sprite[22] ' * ' '  *' ' * '
+sadd sprite[23] '   ' '  *' ' **'
+sadd sprite[24] '   ' '* *' ' * '
+sadd sprite[25] '   ' '*  ' '** '
+sadd sprite[26] ' * ' '*  ' ' * '
+sadd sprite[27] '** ' '*  ' '   '
+sadd sprite[28] ' * ' '* *' '   '
+
+function spritePlot () { # $1 = cell animation index, $2=y pos, $3=x pos
+  local d=$(($2*COLS+$3))
+  local s=$1
+  #fb[d++]=${sprite[s]:0:1}
+  #fb[d++]=${sprite[s]:1:1}
+  #fb[d++]=${sprite[s]:2:1}
+  #((d+=COLS-3))
+  #fb[d++]=${sprite[s]:3:1}
+  #fb[d++]=${sprite[s]:4:1}
+  #fb[d++]=${sprite[s]:5:1}
+  #((d+=COLS-3))
+  #fb[d++]=${sprite[s]:6:1}
+  #fb[d++]=${sprite[s]:7:1}
+  #fb[d++]=${sprite[s]:8:1}
+
+  # hard coded breakout paddle
+  fb[($2+1)*COLS+$3*2]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+1]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+2]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+3]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+4]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+5]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+6]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+7]='\e[1;43m \e[0m'
+  fb[($2+1)*COLS+$3*2+8]='\e[1;43m \e[0m'
+
+  # ship
+  #d=$((ROWS/2*COLS + COLS/2))
+  #s=$((SECONDS%8 + 21))
+  #fb[d++]=${sprite[s]:0:1}
+  #fb[d++]=${sprite[s]:1:1}
+  #fb[d++]=${sprite[s]:2:1}
+  #((d+=COLS-3))
+  #fb[d++]=${sprite[s]:3:1}
+  #fb[d++]=${sprite[s]:4:1}
+  #fb[d++]=${sprite[s]:5:1}
+  #((d+=COLS-3))
+  #fb[d++]=${sprite[s]:6:1}
+  #fb[d++]=${sprite[s]:7:1}
+  #fb[d++]=${sprite[s]:8:1}
+}
+
+# Set newstate in parent environment (variables are dynamic in Bash)
+state=0
+function aniStateNext {
+  case $state in
+
+    (0|1|2|3|4) # normal running just move to next cell
+      ((++state)) ;;
+
+    (5) # continue running or jump
+      (( state = (RANDOM % 4 ? 0 : 6) )) ;;
+
+    (6|7|8|9|10|11|12|13|14|15|16|17|18|19) # normal jumping
+      ((++state)) ;; 
+    (20) # jump again or run
+      (( state = (RANDOM % 2 ? 6 : 0) )) ;;
+  esac
+}
+
+
+gnd="**................~.............._..............&..........."
+
+function plotBorder {
+  ii=$i
+  for x in $( range 0 $((COLS - 1)) ); do
+    #fb[x]="${gnd:ii++%60:1}"
+    fb[x]="\e[44m \e[0m"
+  done
+
+  for y in $(range 1 $((ROWS-1))); do
+    #fb[COLS*y+COLS-1]="${gnd:ii++%60:1}"
+    fb[COLS*y+COLS-1]="\e[44m \e[0m"
+  done
+
+  for x in $( range 1 $((COLS - 1)) ); do
+    #fb[(ROWS-1)*COLS+COLS-x-1]="${gnd:ii++%60:1}"
+    fb[(ROWS-1)*COLS+COLS-x-1]="\e[44m \e[0m"
+  done
+
+  for y in $(range 2 $((ROWS-1))); do
+    #fb[COLS*(ROWS-y)]="${gnd:ii++%60:1}"
+    fb[COLS*(ROWS-y)]="\e[44m \e[0m"
+  done
+}
+
+pp=$((COLS/4)) # player tick
+pd=0 # player direction
+i=1 # global tick
+power=1
+mypid=$$
+
+# ball count
+bc=2
+
+# ball direction
+#eval bd=($(printf '%.s$((RANDOM%%8)) ' $(range $bc)))
+eval bd=($(printf '%.s2 ' $(range $bc)))
+
+#ball glyph
+eval bg=($(printf '%.s\e[4$((i++%%8,7))m" "\e[0m ' $(range $bc)))
+
+# ball location
+bx=($(printf "%.s$(( COLS/2)) " $(range 1 $((bc)) )))
+by=($(printf "%.s$(( ROWS/2+5)) " $(range $bc)))
+
+# Direction increment lookup tables
+bxi=(1  1  0 -1 -1 -1 0 1)
+byi=(0 -1 -1 -1  0  1 1 1)
+
+function plotBall {
+  local i d x y ox oy
+
+  for i in $(range $bc); do
+    d=${bd[i]}
+    x=${bx[i]}
+    y=${by[i]}
+    ox=$x
+    oy=$y
+    (( x+=bxi[d], y+=byi[d] )) # Consider next position
+    if [ "${fbo[x+y*COLS]}" != ' ' ]; then
+      hitBrick $x $y # Maybe we hit a brick? If so remove it.
+      ((x=ox, y=oy, d=(d+3+RANDOM%3)%8)) # New direction.  Do actual movement below
+    fi
+    while  ((ox==x && oy==y)); do
+      (( x+=bxi[d], y+=byi[d] ))
+      if (( x<=0 || COLS<=x || y<=0 || ROWS<=y )); then
+        ((x=ox, y=oy, d=(d+3+RANDOM%3)%8)) # Edge of screen
+      fi
+    done
+
+    fb[x+y*COLS]=${bg[i]}
+    (( fbc[x+y*COLS]++ ))
+    bd[i]=$d
+    bx[i]=$x
+    by[i]=$y
+  done
+
+  for i in $(range $bc); do # any spot with more than one abj get a new direction
+    x=${bx[i]}
+    y=${by[i]}
+    d=${bd[i]}
+    (( 1 < fbc[x+y*COLS] )) && (( bd[i]=(d+3+RANDOM%3)%8 ))
+  done
+
+}
+
+# bricks loc and dimensions
+brx=3
+bry=3
+
+brh=4
+brw=$((COLS-6))
+i=brw
+eval bricks=($(printf '%.s\e[4$((i++/brw%%8))m" "\e[0m ' $(range $((brw*brh)))))
+
+function plotBricks {
+  local i=0 x y
+  for y in $(range $brh); do
+    for x in $(range $brw); do
+      fb[x+brx+(y+bry)*COLS]=${bricks[i++]}
+    done
+  done
+}
+
+function hitBrick { # $1=x $2=y  fb location to check and remove
+  # index into brick array
+  local i=$(( $1-brx + ($2-bry)*brw ))
+  if (( 0<=i && i<(brh*brw) )); then
+    bricks[i]=' '
+  fi
+}
+
+##############################################################################*
+# The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
+
+function trapInthandler {
+  ((power)) || return
+  initScreen || initfb
+  clearfb
+  plotBorder
+  plotBricks
+  spritePlot $state $((ROWS-4)) $pp
+  plotBall
+  fbRender
+  if ((pd)); then # if direction changed, update player position and clear direction
+    ((pp+=pd, pd=0))
+    aniStateNext # next animation state
+  fi
+
+  ((++i))
+  { sleep .01; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
+}
+trap trapInthandler 30
+###############################################################################
+
+function main {
+  p "\e[?25l" # disable cursor
+  kill -s 30 $mypid # Scheduler renderer
+  while (( power && i < 8000 )); do # number of times to loop
+    read -n 1 -s
+    case "$REPLY" in
+      (h|D) ((pd=-1)) ;;
+      (l|C) ((pd=1)) ;;
+      (q) ((power=0)) ;;
+    esac
+  done
+  p "\e[?25h" # enable cursor
+}
+
+main
