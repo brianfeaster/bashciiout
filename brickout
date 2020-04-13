@@ -184,66 +184,63 @@ power=1
 mypid=$$
 
 # ball count
-bc=2
+bc=4
 
 # ball direction
 #eval bd=($(printf '%.s$((RANDOM%%8)) ' $(range $bc)))
-eval bd=($(printf '%.s4 ' $(range $bc)))
+eval bd=($(printf '%.s1 ' $(range $bc)))
 
 #ball glyph
 eval bg=($(printf '%.s\e[4$((i++%%7+1))m" "\e[0m ' $(range $bc)))
 
 # ball location
 bx=($(printf "%.s$(( COLS/2)) " $(range 1 $((bc)) )))
-by=($(printf "%.s$(( ROWS/2+5)) " $(range $bc)))
+by=($(printf "%.s$(( ROWS/2)) " $(range $bc)))
 
 # Direction increment lookup tables
 byi=( -1 -1 -1   1 1 1)
 bxi=(  1  0 -1  -1 0 1)
 
-# 2 1 0
-#  \|/
-#  /|\
-# 3 4 5
-
-# case 3
-#  2 1 0
-#   \|/
-#   ?@
-#   #!\
-#    4 5
-#  5   
-#   @  
-#   ### 
-#          
+# Movement cardinal directions.  Adjacent cardinal directions
+#  2 1 0                             1
+#   \|/                             2+0
+#   /|\                              3
+#  3 4 5
 
 function newdir { # d: direction  x:loc-x  y:location-y
-  local r # result goes here and printed below
-  local b0=${fbo[x+1+(y  )*COLS]}
-  local b1=${fbo[x  +(y-1)*COLS]}
-  local b2=${fbo[x-1+(y  )*COLS]}
-  local b3=${fbo[x  +(y+1)*COLS]}
-  case $d in
-    (0) r=$( [ "$b1" == ' ' ] && p "1 2 "; [ "$b0" == ' ' ] && p "4 5 "; )
+  # consider existance of obj (cardinal directions) adjacent our location to determine orientation of the object we hit: vertical, horizontal, inside corner, outside corner
+  local b0 b1 b2 b3
+  [ "${fbo[x+1+(y  )*COLS]}" != " " ]; (( b0=$? ));
+  [ "${fbo[x  +(y-1)*COLS]}" != " " ]; (( b1=$? ));
+  [ "${fbo[x-1+(y  )*COLS]}" != " " ]; (( b2=$? ));
+  [ "${fbo[x  +(y+1)*COLS]}" != " " ]; (( b3=$? ));
+  local r='' # accumulate list of possible directions
+  # Depending on orientation of the collided "wall", consider all legal new directions.
+  case $d in # currently moving in this cardinal directio
+    (0) ((b1)) && r="1 2 "
+        ((b0)) && r=$r"4 5"
         r=${r:-3} ;;
     (1) r="3 4 5" ;;
-    (2) r=$( [ "$b1" == ' ' ] && p "0 1 "; [ "$b2" == ' ' ] && p "3 4 "; )
+    (2) ((b1)) && r="0 1 "
+        ((b2)) && r=$r"3 4"
         r=${r:-5} ;;
-    (3) r=$( [ "$b2" == ' ' ] && p "1 2 "; [ "$b3" == ' ' ] && p "4 5 "; )
+    (3) ((b2)) && r="1 2 "
+        ((b3)) && r=$r"4 5"
         r=${r:-0} ;;
     (4) r="0 1 2" ;;
-    (5) r=$( [ "$b0" == ' ' ] && p "0 1 "; [ "$b3" == ' ' ] && p "3 4 "; )
+    (5) ((b0)) && r="0 1 "
+        ((b3)) && r=$r"3 4"
         r=${r:-2} ;;
   esac
-  r=($r)
-  p ${r[ RANDOM % ${#r[@]} ]}
+  r=($r) # list of numbers into array
+  p ${r[ RANDOM % ${#r[@]} ]} # pick random element from array
 }
 #COLS=3
 #d=5
 #x=0
 #y=0
-#fbo=(" " " " "@"
-#     " " "#" " "
+#fbo=("@" "#" " "
+#     "#" "#" " "
 #     " " " " " ")
 #newdir
 #exit
@@ -276,11 +273,10 @@ function plotBall {
     by[i]=$y
   done
 
-  for i in $(range $bc); do # any spot with more than one abj get a new direction
+  for i in $(range $bc); do # Any spot with more than one obj gets a new random direction
     x=${bx[i]}
     y=${by[i]}
-    d=${bd[i]}
-    (( 1 < fbc[x+y*COLS] )) && bd[i]=$(newdir)
+    (( 1 < fbc[x+y*COLS] )) && (( bd[i]=(bd[i]+RANDOM%5)%6))
   done
 
 }
@@ -291,10 +287,10 @@ bry=4
 
 brs=3 # size/width of each brick
 
-brh=4
+brh=5
 brw=$(( (COLS-2)/brs ))
-i=brw
-eval bricks=($(printf '%.s\e[4$((i++/brw%%8))m" "\e[0m ' $(range $((brw*brh)))))
+i=0
+eval bricks=($(printf '%.s\e[4$(( (i++/brw%%7)+1 ))m" "\e[0m ' $(range $((brw*brh)))))
 
 function plotBricks {
   local i=0 x y s
@@ -335,7 +331,7 @@ function trapInthandler {
   fi
 
   ((++i))
-  { sleep .1; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
+  { sleep .01; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
 }
 trap trapInthandler 30
 ###############################################################################
