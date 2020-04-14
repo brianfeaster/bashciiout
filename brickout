@@ -148,15 +148,15 @@ function spritePlot () { # $1 = cell animation index, $2=y pos, $3=x pos
   done
 
   # hard coded breakout paddle
-  fb[($2+2)*COLS+$3*2]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+1]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+2]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+3]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+4]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+5]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+6]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+7]='\e[1;43m \e[0m'
-  fb[($2+2)*COLS+$3*2+8]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+1]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+2]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+3]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+4]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+5]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+6]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+7]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS + $3*2+8]='\e[1;43m \e[0m'
 
   # ship
   #d=$((ROWS/2*COLS + COLS/2))
@@ -218,7 +218,7 @@ function plotBorder {
   done
 }
 
-((pp=COLS/4)) # player tick
+((pp=COLS/4-2)) # player position
 pd=0 # player direction
 i=1 # global tick
 power=1
@@ -241,7 +241,7 @@ arraynew bg '\e[4$((i++%%7+1))m\ \e[0m' $bc
 
 # ball location
 arraynew bx $((COLS/2)) $bc
-arraynew by $((ROWS/2)) $bc
+arraynew by $((ROWS-2)) $bc
 
 # Direction increment lookup tables
 byi=(-1 -1 -1   1 1 1)
@@ -425,7 +425,7 @@ function trapInthandler {
   fi
 
   ((++i))
-  { sleep .01; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
+  { sleep .02; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
 }
 trap trapInthandler 30
 ###############################################################################
@@ -441,7 +441,8 @@ function main {
       (q) ((power=0)) ;;
     esac
   done
-  p "\e[?25h" # enable cursor
+  p "\e[?25h\e[${ROWS}H" # enable cursor
+  sleep .2
 }
 
 main
