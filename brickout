@@ -127,16 +127,36 @@ function spritePlot () { # $1 = cell animation index, $2=y pos, $3=x pos
     fb[d++]=${sprite[s]:8:1}
   done
 
+  # Draw number of balls
+  sec=$((bc-bk))
+  i=$((COLS/6))
+  [[ $sec =~ ${sec//?/(.)} ]]
+  for n in ${BASH_REMATCH[@]:1}; do
+    d=$((1+i++*3+COLS))
+    (( s=n+29 ))
+    fb[d++]=${sprite[s]:0:1}
+    fb[d++]=${sprite[s]:1:1}
+    fb[d++]=${sprite[s]:2:1}
+    ((d+=COLS-3))
+    fb[d++]=${sprite[s]:3:1}
+    fb[d++]=${sprite[s]:4:1}
+    fb[d++]=${sprite[s]:5:1}
+    ((d+=COLS-3))
+    fb[d++]=${sprite[s]:6:1}
+    fb[d++]=${sprite[s]:7:1}
+    fb[d++]=${sprite[s]:8:1}
+  done
+
   # hard coded breakout paddle
-  fb[($2+0)*COLS+$3*2]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+1]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+2]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+3]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+4]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+5]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+6]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+7]='\e[1;43m \e[0m'
-  fb[($2+0)*COLS+$3*2+8]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+1]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+2]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+3]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+4]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+5]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+6]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+7]='\e[1;43m \e[0m'
+  fb[($2+2)*COLS+$3*2+8]='\e[1;43m \e[0m'
 
   # ship
   #d=$((ROWS/2*COLS + COLS/2))
@@ -187,18 +207,18 @@ function plotBorder {
     fb[COLS*y+COLS-1]="\e[44m \e[0m"
   done
 
-  for x in $( range 1 $((COLS - 1)) ); do
-    #fb[(ROWS-1)*COLS+COLS-x-1]="${gnd:ii++%60:1}"
-    fb[(ROWS-1)*COLS+COLS-x-1]="\e[44m \e[0m"
-  done
+  #for x in $( range 1 $((COLS - 1)) ); do
+  #  #fb[(ROWS-1)*COLS+COLS-x-1]="${gnd:ii++%60:1}"
+  #  fb[(ROWS-1)*COLS+COLS-x-1]="\e[44m \e[0m"
+  #done
 
-  for y in $(range 2 $((ROWS-1))); do
+  for y in $(range 1 $((ROWS-1))); do
     #fb[COLS*(ROWS-y)]="${gnd:ii++%60:1}"
     fb[COLS*(ROWS-y)]="\e[44m \e[0m"
   done
 }
 
-pp=$((COLS/4)) # player tick
+((pp=COLS/4)) # player tick
 pd=0 # player direction
 i=1 # global tick
 power=1
@@ -206,10 +226,15 @@ mypid=$$
 
 # ball count
 bc=8
+# dead balls
+bk=0
 
 # ball direction
-arraynew bd '$((RANDOM%%6))' $bc
+#arraynew bd '$((RANDOM%%6))' $bc
 arraynew bd 1 $bc
+
+# ball alive?
+arraynew ba 1 $bc
 
 #ball glyph
 arraynew bg '\e[4$((i++%%7+1))m\ \e[0m' $bc
@@ -270,34 +295,46 @@ function plotBall {
   local i d x y ox oy
 
   for i in $(range $bc); do
-    d=${bd[i]}
-    x=${bx[i]}
-    y=${by[i]}
-    ox=$x
-    oy=$y
-    (( x+=bxi[d], y+=byi[d] )) # Consider next position
-    if [ "${fbo[x+y*COLS]}" != ' ' ]; then
-      hitBrick $x $y # Maybe we hit a brick? If so remove it.
-      ((x=ox, y=oy)) ; ((d=$(newdir) )) # New direction.  Do actual movement below
-    fi
-    while  ((ox==x && oy==y)); do
-      (( x+=bxi[d], y+=byi[d] ))
-      if (( x<=0 || COLS<=x || y<=0 || ROWS<=y )); then
-        ((x=ox, y=oy)) ; ((d=$(newdir) )) # Edge of screen
+    if (( ba[i] )); then
+      d=${bd[i]}
+      x=${bx[i]}
+      y=${by[i]}
+      ox=$x
+      oy=$y
+      (( x+=bxi[d], y+=byi[d] )) # Consider next position
+      if (( y < ROWS )); then
+        if [ "${fbo[x+y*COLS]}" != ' ' ]; then
+          hitBrick $x $y # Maybe we hit a brick? If so remove it.
+          ((x=ox, y=oy)) ; ((d=$(newdir) )) # New direction.  Do actual movement below
+        fi
+        while  ((ox==x && oy==y)); do
+          (( x+=bxi[d], y+=byi[d] ))
+          if (( x<=0 || COLS<=x || y<=0 || ROWS<=y )); then
+            ((x=ox, y=oy)) ; ((d=$(newdir) )) # Edge of screen
+          fi
+        done
+    
+        if (( y < ROWS )); then
+          fb[x+y*COLS]=${bg[i]}
+          (( fbc[x+y*COLS]++ ))
+          bd[i]=$d
+          bx[i]=$x
+          by[i]=$y
+        else
+          (( ba[i]=0, bk++ )) # kill this ball
+        fi
+      else
+        (( ba[i]=0, bk++ )) # kill this ball
       fi
-    done
-
-    fb[x+y*COLS]=${bg[i]}
-    (( fbc[x+y*COLS]++ ))
-    bd[i]=$d
-    bx[i]=$x
-    by[i]=$y
+    fi
   done
 
   for i in $(range $bc); do # Any spot with more than one obj gets a new random direction
-    x=${bx[i]}
-    y=${by[i]}
-    (( 1 < fbc[x+y*COLS] )) && (( bd[i]=(bd[i]+RANDOM%5)%6))
+    if (( ba[i] )); then
+      x=${bx[i]}
+      y=${by[i]}
+      (( 1 < fbc[x+y*COLS] )) && (( bd[i]=(bd[i]+RANDOM%5)%6))
+    fi
   done
 
 }
@@ -353,6 +390,21 @@ function plotStars {
   done
 }
 
+function plotText {
+  local x=$1 y=$2 pre=$3 sec=$4 d
+  (( d=x+y*COLS ))
+  [[ $sec =~ ${sec//?/(.)} ]]
+  for n in "${BASH_REMATCH[@]:1}"; do
+    fb[d++]="$pre$n\e[0m"
+  done
+}
+
+function plotGameover {
+  (( bc - bk )) && return
+  plotText $((COLS/2-8)) $((ROWS/2))   "\e[1m" "Thy Game Is Over"
+  plotText $((COLS/2-11)) $((ROWS/2+2)) "\e[0m" "(press 'q' to continue)"
+}
+
 ##############################################################################*
 # The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
 
@@ -365,6 +417,7 @@ function trapInthandler {
   spritePlot $state $((ROWS-4)) $pp
   plotBricks # should plot bricks after plotBall as it might remove a brick or two
   plotBall
+  plotGameover
   fbRender
   if ((pd)); then # if direction changed, update player position and clear direction
     ((pp+=pd, pd=0))
