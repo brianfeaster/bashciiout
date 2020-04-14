@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# scheduler 0 should work on more recent Bash
+# scheduler 1 should work on old Bash / MacOS
+scheduler=${1:-0}
+
 ###############################################################################
 # Helpers
 function p { printf "$@"; }
@@ -424,17 +428,30 @@ function trapInthandler {
     aniStateNext # next animation state
   fi
 
-  ((++i))
-  { sleep .02; kill -s 30 $mypid 2>/dev/null ; } &  # Reschedule renderer
+  ((++i)) # tick the ticker
+
+  if ((scheduler)); then
+    # MacOS Bash scheduling
+    sleep .02
+    kill -s 30 $mypid 2>/dev/null
+  fi &  # Reschedule renderer
 }
 trap trapInthandler 30
 ###############################################################################
 
 function main {
   p "\e[?25l" # disable cursor
+  stty raw -echo
   kill -s 30 $mypid # Scheduler renderer
   while (( power && i < 8000 )); do # number of times to loop
-    read -n 1 -s
+    if ((scheduler)); then
+      # MacOS Bash scheduling
+      read -n 1 -s
+    else
+      # Latest Linux Bash scheduling
+      read -t .02 -n 1 -s
+      kill -s 30 $mypid 2>/dev/null
+    fi
     case "$REPLY" in
       (h|D) ((pd=-1)) ;;
       (l|C) ((pd=1)) ;;
@@ -442,6 +459,7 @@ function main {
     esac
   done
   p "\e[?25h\e[${ROWS}H" # enable cursor
+  stty cooked echo
   sleep .2
 }
 

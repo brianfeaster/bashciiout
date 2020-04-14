@@ -3,7 +3,7 @@
 
 ## How to play
 
-- Run `brickout` in your shell
+- Run `brickout` in your shell (or `brickout 1` for older Bash/MacOS)
 - Move left 'h' or right 'l'
 - Quit/Exit 'q'
 
