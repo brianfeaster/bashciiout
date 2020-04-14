@@ -91,20 +91,37 @@ sadd sprite[26] ' * ' '*  ' ' * '
 sadd sprite[27] '** ' '*  ' '   '
 sadd sprite[28] ' * ' '* *' '   '
 
+#numbers
+sadd sprite[29] ' _ ' '| |' '|_|'
+sadd sprite[30] '   ' ' | ' ' | '
+sadd sprite[31] ' _ ' ' _|' '|_ '
+sadd sprite[32] ' _ ' ' _|' ' _|'
+sadd sprite[33] '   ' '|_|' '  |'
+sadd sprite[34] ' _ ' '|_ ' ' _|'
+sadd sprite[35] ' _ ' '|_ ' '|_|'
+sadd sprite[36] ' _ ' '  /' ' | '
+sadd sprite[37] ' _ ' '|_|' '|_|'
+sadd sprite[38] ' _ ' '|_|' ' _|'
+
+
 function spritePlot () { # $1 = cell animation index, $2=y pos, $3=x pos
-  local d=$(($2*COLS+$3))
-  local s=$1
-  #fb[d++]=${sprite[s]:0:1}
-  #fb[d++]=${sprite[s]:1:1}
-  #fb[d++]=${sprite[s]:2:1}
-  #((d+=COLS-3))
-  #fb[d++]=${sprite[s]:3:1}
-  #fb[d++]=${sprite[s]:4:1}
-  #fb[d++]=${sprite[s]:5:1}
-  #((d+=COLS-3))
-  #fb[d++]=${sprite[s]:6:1}
-  #fb[d++]=${sprite[s]:7:1}
-  #fb[d++]=${sprite[s]:8:1}
+  local i=0 d s sec=$score
+  [[ $sec =~ ${sec//?/(.)} ]]
+  for n in ${BASH_REMATCH[@]:1}; do
+    d=$((1+i++*3+COLS))
+    (( s=n+29 ))
+    fb[d++]=${sprite[s]:0:1}
+    fb[d++]=${sprite[s]:1:1}
+    fb[d++]=${sprite[s]:2:1}
+    ((d+=COLS-3))
+    fb[d++]=${sprite[s]:3:1}
+    fb[d++]=${sprite[s]:4:1}
+    fb[d++]=${sprite[s]:5:1}
+    ((d+=COLS-3))
+    fb[d++]=${sprite[s]:6:1}
+    fb[d++]=${sprite[s]:7:1}
+    fb[d++]=${sprite[s]:8:1}
+  done
 
   # hard coded breakout paddle
   fb[($2+0)*COLS+$3*2]='\e[1;43m \e[0m'
@@ -184,7 +201,7 @@ power=1
 mypid=$$
 
 # ball count
-bc=4
+bc=1
 
 # ball direction
 #eval bd=($(printf '%.s$((RANDOM%%8)) ' $(range $bc)))
@@ -291,6 +308,7 @@ brh=5
 brw=$(( (COLS-2)/brs ))
 i=0
 eval bricks=($(printf '%.s\e[4$(( (i++/brw%%7)+1 ))m" "\e[0m ' $(range $((brw*brh)))))
+score=0
 
 function plotBricks {
   local i=0 x y s
@@ -308,8 +326,9 @@ function plotBricks {
 function hitBrick { # $1=x $2=y  fb location to check and remove
   # index into brick array
   local i=$(( ($1-brx)/brs + ($2-bry)*brw ))
-  if (( 0<=i && i<(brh*brw) )); then
+  if (( 0<=i && i<(brh*brw) )) && [ "${bricks[i]}" != ' ' ]; then
     bricks[i]=' '
+    ((score+=100000))
   fi
 }
 
