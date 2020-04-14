@@ -12,6 +12,8 @@ function sadd { # append $2=str to $1=LHS
   IFS=$ifs
 }
 function range { eval echo {$((${2:+$1}+0))..$((${2:-$1-1}))}; }
+function arraynew { eval $1="($(printf "%.s$2 " $(range $3 $4)))"; }
+
 
 ###############################################################################
 # Screen size
@@ -25,7 +27,9 @@ function initScreen {
  COLS=${sttysize[1]}
  (( r == ROWS && c == COLS )) # return false if screen size updated
 }
-initScreen 
+while ((!ROWS)) || ((!COLS)); do
+  initScreen
+done
 
 ###############################################################################
 # frame buffer
@@ -36,8 +40,8 @@ fbo=() # frame buffer old/last (what was lat rendered, current state?)
 fbc=() # frame buffer counters
 
 function initfb {
-  eval emptyfb=( $(printf "%.s' ' " $(range 1 $((ROWS * COLS)))) )
-  eval emptyfbc=( $(printf "%.s0 " $(range 1 $((ROWS * COLS)))) )
+  arraynew emptyfb '" "' $((ROWS*COLS))
+  arraynew emptyfbc 0 $((ROWS*COLS))
 }
 initfb
 
@@ -162,7 +166,7 @@ function aniStateNext {
       (( state = (RANDOM % 4 ? 0 : 6) )) ;;
 
     (6|7|8|9|10|11|12|13|14|15|16|17|18|19) # normal jumping
-      ((++state)) ;; 
+      ((++state)) ;;
     (20) # jump again or run
       (( state = (RANDOM % 2 ? 6 : 0) )) ;;
   esac
@@ -201,22 +205,22 @@ power=1
 mypid=$$
 
 # ball count
-bc=1
+bc=8
 
 # ball direction
-#eval bd=($(printf '%.s$((RANDOM%%8)) ' $(range $bc)))
-eval bd=($(printf '%.s1 ' $(range $bc)))
+arraynew bd '$((RANDOM%%6))' $bc
+arraynew bd 1 $bc
 
 #ball glyph
-eval bg=($(printf '%.s\e[4$((i++%%7+1))m" "\e[0m ' $(range $bc)))
+arraynew bg '\e[4$((i++%%7+1))m\ \e[0m' $bc
 
 # ball location
-bx=($(printf "%.s$(( COLS/2)) " $(range 1 $((bc)) )))
-by=($(printf "%.s$(( ROWS/2)) " $(range $bc)))
+arraynew bx $((COLS/2)) $bc
+arraynew by $((ROWS/2)) $bc
 
 # Direction increment lookup tables
-byi=( -1 -1 -1   1 1 1)
-bxi=(  1  0 -1  -1 0 1)
+byi=(-1 -1 -1   1 1 1)
+bxi=( 1  0 -1  -1 0 1)
 
 # Movement cardinal directions.  Adjacent cardinal directions
 #  2 1 0                             1
@@ -307,7 +311,7 @@ brs=3 # size/width of each brick
 brh=5
 brw=$(( (COLS-2)/brs ))
 i=0
-eval bricks=($(printf '%.s\e[4$(( (i++/brw%%7)+1 ))m" "\e[0m ' $(range $((brw*brh)))))
+arraynew bricks '\e[4$(((i++/brw%%7)+1))m\ \e[0m' $((brw*brh))
 score=0
 
 function plotBricks {
@@ -332,6 +336,23 @@ function hitBrick { # $1=x $2=y  fb location to check and remove
   fi
 }
 
+###############################################################################
+# Star field
+sfc=20
+arraynew sfx '$((RANDOM %% COLS))' $sfc
+arraynew sfy '$((RANDOM %% ROWS))' $sfc
+arraynew sfi '$((RANDOM %% 2))' $sfc
+sfcm=("\e[34m." "\e[37m.")
+
+function plotStars {
+  local i=$sfc c
+  while ((i--)); do
+    ((c=sfi[i]))
+    (( ROWS <= (sfy[i]+=c+1) )) && ((sfy[i]=0, sfx[i]=RANDOM % COLS))
+    fb[sfx[i]+sfy[i]*COLS]="${sfcm[c]}\e[0m"
+  done
+}
+
 ##############################################################################*
 # The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
 
@@ -339,6 +360,7 @@ function trapInthandler {
   ((power)) || return
   initScreen || initfb
   clearfb
+  plotStars
   plotBorder
   spritePlot $state $((ROWS-4)) $pp
   plotBricks # should plot bricks after plotBall as it might remove a brick or two
