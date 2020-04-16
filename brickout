@@ -3,6 +3,8 @@
 # scheduler 0 should work on more recent Bash
 # scheduler 1 should work on old Bash / MacOS
 scheduler=${1:-0}
+IPCFB=/tmp/brickoutfb
+IPCP0=/tmp/brickoutp0
 
 ###############################################################################
 # Helpers
@@ -60,8 +62,8 @@ function fbRender { # Render framebuffer
   local ifs=$IFS
   IFS=''
   ## Write output to file "log"
-  printf "\e[H${fb[*]}" &
-  ((p2)) && printf "\e[H${fb[*]}" >> log &
+  printf "\e[H${fb[*]}"
+  ((p2)) && printf "\e[H${fb[*]}" >> $IPCFB
   IFS=$ifs
 }
 ###############################################################################
@@ -241,7 +243,7 @@ p2=0 # player 2 exists?
 
 arraynew pp $((COLS/4-2)) 2 # player position
 
-pd=(0 0)# player direction
+pd=(0 0) # player direction
 i=1 # global tick
 power=1
 mypid=$$
@@ -335,7 +337,7 @@ function plotBall {
             ((x=ox, y=oy)) ; ((d=$(newdir) )) # Edge of screen
           fi
         done
-    
+
         if (( y < ROWS )); then
           fb[x+y*COLS]=${bg[i]}
           (( fbc[x+y*COLS]++ ))
@@ -431,10 +433,11 @@ function plotGameover {
 # The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
 
 function trapInthandler {
+  local key
   ((power)) || return
   ## Player 2
-  read -n 1 -u 3
-  case "$REPLY" in
+  read -n 1 -u 3 key
+  case "$key" in
     (2) p2=1 ;;
     (l) ((pd[1]=-1)) ;;
     (r) ((pd[1]=1)) ;;
@@ -447,7 +450,7 @@ function trapInthandler {
   plotBricks # should plot bricks after plotBall as it might remove a brick or two
   plotBall
   plotGameover
-  fbRender &
+  fbRender
   if ((pd[0])); then # if direction changed, update player position and clear direction
     ((pp[0]+=pd[0], pd[0]=0))
     #aniStateNext # next animation state
@@ -470,7 +473,8 @@ trap trapInthandler 30
 ###############################################################################
 
 function server {
-  exec 4>ff 3<ff
+  local key
+  exec 4>$IPCP0 3<$IPCP0
   p "\e[?25l" # disable cursor
   stty raw -echo
   kill -s 30 $mypid # Scheduler renderer
@@ -478,13 +482,13 @@ function server {
     ## Player 1
     if ((scheduler)); then
       # MacOS Bash scheduling
-      read -n 1 -s
+      read -n 1 -s key
     else
       # Latest Linux Bash scheduling
-      read -t .02 -n 1 -s
+      read -t .02 -n 1 -s key
       kill -s 30 $mypid 2>/dev/null
     fi
-    case "$REPLY" in
+    case "$key" in
       (h|D) ((pd[0]=-1)) ;;
       (l|C) ((pd[0]=1)) ;;
       (q) ((power=0)) ;;
@@ -492,21 +496,21 @@ function server {
   done
   p "\e[?25h\e[${ROWS}H" # enable cursor
   stty cooked echo
-  rm ff log
+  rm $IPCP0 $IPCFB 2>/dev/null
   sleep .2
 }
 
 function client {
-  touch log # Write log file for server
-  exec 3>>ff # open comm with server
+  touch $IPCFB # Write log file for server
+  exec 3>>$IPCP0 # open comm with server
   echo -en 2 >&3 # Announce to server player 2 is here
   p "\e[?25l" # disable cursor
   stty raw -echo
-  tail -f log & # start rendering the field process
-  local cid=$! # keep track of rendering PID
+  tail -f $IPCFB & # start rendering the field process
+  local key cid=$! # keep track of rendering PID
   while (( power && i < 10000 )); do
-    read -n 1 -s
-    case "$REPLY" in
+    read -n 1 -s key
+    case "$key" in
       (h|D) echo -en l >&3 ;;
       (l|C) echo -en r >&3 ;;
       (q) ((power=0)); echo -en q >&3 ;;
@@ -517,14 +521,8 @@ function client {
   kill $cid # kill rendering process
 }
 
-if [ -f ff ]; then
+if [ -f $IPCP0 ]; then
   client
   else
   server
 fi
-#exec 4>&0 <( nc 72.14.188.107 80 ) 3>&0  0>&4
-
-#echo $'GET / HTTP/1.1\r\nHost: shroom.dv8.org\r\n\r\n' >&3
-#cat <&3
-
-#cat 3<&0 <(read -u 3 x ;echo $x$x)
