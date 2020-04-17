@@ -3,23 +3,25 @@
 # scheduler 0 should work on more recent Bash
 # scheduler 1 should work on old Bash / MacOS
 scheduler=${1:-0}
-IPCFB=/tmp/brickoutfb
-IPCP0=/tmp/brickoutp0
+
+# Files used for interprocess communication
+IPCFB=/tmp/brickoutfb # shared framebuffer
+IPCP1=/tmp/brickoutp1 # commands from player 1
 
 ###############################################################################
 # Helpers
 function p { printf "$@"; }
-function sadd { # append $2=str to $1=LHS
-  local ifs=$IFS
+
+function sadd { # append to var $1 (should be a string), remaining args
+  local IFS=''
   v=$1
   shift
-  IFS=''
   eval $v=\${$v}'$*'
-  IFS=$ifs
 }
-function range { eval echo {$((${2:+$1}+0))..$((${2:-$1-1}))}; }
-function arraynew { eval $1="($(printf "%.s$2 " $(range $3 $4)))"; }
 
+function range { eval echo {$((${2:+$1}+0))..$((${2:-$1-1}))}; }
+
+function arraynew { eval $1="( $( (($3)) && printf "%.s\"$2\" " $(range $3 $4) || printf "\"$2\"" ) )"; }
 
 ###############################################################################
 # Screen size
@@ -46,26 +48,25 @@ fbo=() # frame buffer old/last (what was lat rendered, current state?)
 fbc=() # frame buffer counters
 
 function initfb {
-  arraynew emptyfb '" "' $((ROWS*COLS))
+  arraynew emptyfb ' ' $((ROWS*COLS))
   arraynew emptyfbc 0 $((ROWS*COLS))
 }
 initfb
 
 function clearfb {
-  fbo=("${fb[@]}") # Keep track of current framebuffer
-  fb=("${emptyfb[@]}") # new empty framebuffer
-  fbc=("${emptyfbc[@]}")
+  arraynew fbo '${fb[@]}' # Keep track of current framebuffer
+  arraynew fb  '${emptyfb[@]}' # new empty framebuffer
+  arraynew fbc '${emptyfbc[@]}'
 }
 clearfb
 
 function fbRender { # Render framebuffer
-  local ifs=$IFS
-  IFS=''
-  ## Write output to file "log"
+  local IFS=''
   printf "\e[H${fb[*]}"
+  ## Write output to file "log"
   ((p2)) && printf "\e[H${fb[*]}" >> $IPCFB
-  IFS=$ifs
 }
+
 ###############################################################################
 
 # running
@@ -213,17 +214,16 @@ function aniStateNext {
   esac
 }
 
-
 gnd="**................~.............._..............&..........."
 
 function plotBorder {
   ii=$i
-  for x in $( range 0 $((COLS - 1)) ); do
+  for x in $( range 0 COLS-1 ); do
     #fb[x]="${gnd:ii++%60:1}"
     fb[x]="\e[44m \e[0m"
   done
 
-  for y in $(range 1 $((ROWS-1))); do
+  for y in $(range 1 ROWS-1); do
     #fb[COLS*y+COLS-1]="${gnd:ii++%60:1}"
     fb[COLS*y+COLS-1]="\e[44m \e[0m"
   done
@@ -261,7 +261,7 @@ arraynew bd 1 $bc
 arraynew ba 1 $bc
 
 #ball glyph
-arraynew bg '\e[4$((i++%%7+1))m\ \e[0m' $bc
+arraynew bg '\e[4$((i++%%7+1))m \e[0m' $bc
 
 # ball location
 arraynew bx $((COLS/2)) $bc
@@ -372,7 +372,7 @@ brs=3 # size/width of each brick
 brh=5
 brw=$(( (COLS-2)/brs ))
 i=0
-arraynew bricks '\e[4$(((i++/brw%%7)+1))m\ \e[0m' $((brw*brh))
+arraynew bricks '\e[4$(((i++/brw%%7)+1))m \e[0m' $((brw*brh))
 score=0
 
 function plotBricks {
@@ -403,7 +403,7 @@ sfc=20
 arraynew sfx '$((RANDOM %% COLS))' $sfc
 arraynew sfy '$((RANDOM %% ROWS))' $sfc
 arraynew sfi '$((RANDOM %% 2))' $sfc
-sfcm=("\e[34m." "\e[37m.")
+sfcm=('\e[34m.' '\e[37m.')
 
 function plotStars {
   local i=$sfc c
@@ -471,10 +471,43 @@ function trapInthandler {
 }
 trap trapInthandler 30
 ###############################################################################
-
+#
+# IPC model
+#
+#   The first process is the 'server' and does all the work.  The others are
+#   'clients' and should just send user input and print whatever the server
+#   generates.
+#
+#   Steps:
+#
+#     * First process is the server
+#
+#       {p0}
+#
+#     * Server creates an IPC file for incoming messages.
+#
+#       {p0}<----[ipc/p0]
+#
+#     * Second process is a client.  Client creates IPC file for incoming 
+#       screen/graphics from the server.
+#
+#       {p0}<----[ipc/p0]    {p1}
+#                [ipc/fb]----^
+#
+#     * Client opens IPC file to send messages to server
+#
+#        {p0}<----[ipc/p0]<---{p1}
+#                 [ipc/fb]----^
+#
+#     * Server, once it receives a message from the client,  beings writing to
+#       the graphics IPC.
+#
+#        {p0}<---<[ipc/p0]<--<{p1}
+#           v---->[ipc/fb]>---^
+#
 function server {
   local key
-  exec 4>$IPCP0 3<$IPCP0
+  exec 4>$IPCP1 3<$IPCP1
   p "\e[?25l" # disable cursor
   stty raw -echo
   kill -s 30 $mypid # Scheduler renderer
@@ -496,13 +529,13 @@ function server {
   done
   p "\e[?25h\e[${ROWS}H" # enable cursor
   stty cooked echo
-  rm $IPCP0 $IPCFB 2>/dev/null
+  rm $IPCP1 $IPCFB 2>/dev/null
   sleep .2
 }
 
 function client {
-  touch $IPCFB # Write log file for server
-  exec 3>>$IPCP0 # open comm with server
+  touch $IPCFB # Create FrameBuffer IPC file for server.
+  exec 3>>$IPCP1 # open comm with server
   echo -en 2 >&3 # Announce to server player 2 is here
   p "\e[?25l" # disable cursor
   stty raw -echo
@@ -521,7 +554,7 @@ function client {
   kill $cid # kill rendering process
 }
 
-if [ -f $IPCP0 ]; then
+if [ -f $IPCP1 ]; then
   client
   else
   server
