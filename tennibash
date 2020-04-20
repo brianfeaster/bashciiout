@@ -1,0 +1,423 @@
+#!/bin/bash
+
+# scheduler 0 should work on more recent Bash
+# scheduler 1 should work on old Bash / MacOS
+scheduler=${1:-0}
+
+# Files used for interprocess communication
+IPCFB=/tmp/tennibashfb # shared framebuffer
+IPCP1=/tmp/tennibashp1 # commands from player 1
+
+###############################################################################
+# Helpers
+function p { printf "$@"; }
+
+function sadd { # append to var $1 (should be a string), remaining args
+  local IFS=''
+  v=$1
+  shift
+  eval $v=\${$v}'$*'
+}
+
+function range { eval echo {$((${2:+$1}+0))..$((${2:-$1-1}))}; }
+
+function arraynew { eval $1="( $( (($3)) && printf "%.s\"$2\" " $(range $3 $4) || printf "\"$2\"" ) )"; }
+
+function strary {
+  [[ $1 =~ ${1//?/(.)} ]]
+  eval "$2=(\"\${BASH_REMATCH[@]:1}\")"
+}
+
+function randomstring {
+  printf $(eval printf '\\\\\x%2x' $(printf '%.s$((RANDOM%%95+32)) '  {1..40}))
+}
+
+###############################################################################
+# Screen size
+ROWS=0
+COLS=0
+
+function initScreen {
+ local r=$ROWS c=$COLS
+ sttysize=($(stty size)) # (ROWS COLUMNS)
+ ROWS=${sttysize[0]}
+ COLS=${sttysize[1]}
+ (( r == ROWS && c == COLS )) # return false if screen size updated
+}
+while ((!ROWS)) || ((!COLS)); do
+  initScreen
+done
+
+###############################################################################
+# frame buffer
+emptyfb=()
+emptyfbc=()
+fb=()  # frame buffer new/current (starts off empty, is drawn on)
+fbo=() # frame buffer old/last (what was lat rendered, current state?)
+fbc=() # frame buffer counters
+
+function initfb {
+  arraynew emptyfb ' ' $((ROWS*COLS))
+  arraynew emptyfbc 0 $((ROWS*COLS))
+}
+initfb
+
+function clearfb {
+  arraynew fbo '${fb[@]}' # Keep track of current framebuffer
+  (($1)) || arraynew fb  '${emptyfb[@]}' # new empty framebuffer
+  arraynew fbc '${emptyfbc[@]}'
+}
+clearfb
+
+function fbRender { # Render framebuffer
+  local IFS=''
+  printf "\e[H${fb[*]}"
+  ## Write output to file "log"
+  ((p2)) && printf "\e[H${fb[*]}" >> $IPCFB
+}
+
+###############################################################################
+
+
+# Terminal cardinal directions for the walk steps returnd by linewalk
+iy=(0 -1 -1 -1  0  1 1 1)
+ix=(1  1  0 -1 -1 -1 0 1)
+
+function linewalk { #bresenham walk from two points
+  local y x ay ax st inc e yx
+  (( y=$3-$1, x=$4-$2, ay=y<0?-y:y, ax=x<0?-x:x ))
+  if ((ay < ax)); then
+    if ((0 < x)); then  # Walk X and increment Y
+      (( (0<y) ? (st=0, inc=7) : (st=0, inc=1) ))
+    else
+      (( (0<y) ? (st=4, inc=5) : (st=4, inc=3) ))
+    fi
+    ((y=ay, x=ax))
+  else
+    if ((0 < y)); then  # Walk Y and increment X
+      (( (0<x) ? (st=6, inc=7) : ( st=6, inc=5 ) ))
+    else
+      (( (0<x) ? (st=2, inc=1) : ( st=2, inc=3 ) ))
+    fi
+    ((y=ax, x=ay))
+  fi
+  ((y=y+y, e=y-x, yx=y-x-x))
+  while ((0 < x)); do
+    echo $(( --x, (0 < e) ? (e+=yx, inc) : (e+=y, st) ))
+  done
+}
+
+
+function drawSteps {
+  local c=$1 y=$2 x=$3 n=$4 m=$5
+  fb[y*COLS+x]="$c"
+  for d in $(linewalk $y $x $n $m); do
+    ((y+=iy[d], x+=ix[d]))
+    fb[y*COLS+x]="$c"
+  done
+}
+
+function plotWall () {
+  local fbi=$(( (ROWS-2)*COLS + COLS/2)) height=$1
+  while ((height--)); do
+    fb[fbi]='\e[37;41m#\e[0m'
+    fb[fbi+1]='\e[37;41m#\e[0m'
+   ((fbi-=COLS))
+  done
+}
+
+function plotPaddle {
+  local fbi=$(((ROWS-3)*COLS + $1*2)) c=${2:-\e[37mX}
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi++]="${c}\e[0m"
+  fb[fbi+r]="${c}\e[0m"
+}
+
+#numbers
+sadd sprite[0] ' _ ' '| |' '|_|'
+sadd sprite[1] '   ' ' | ' ' | '
+sadd sprite[2] ' _ ' ' _|' '|_ '
+sadd sprite[3] ' _ ' ' _|' ' _|'
+sadd sprite[4] '   ' '|_|' '  |'
+sadd sprite[5] ' _ ' '|_ ' ' _|'
+sadd sprite[6] ' _ ' '|_ ' '|_|'
+sadd sprite[7] ' _ ' '  /' ' | '
+sadd sprite[8] ' _ ' '|_|' '|_|'
+sadd sprite[9] ' _ ' '|_|' ' _|'
+
+function plotNum () {
+  local str=$1 ary fbi=$((${2:-0}*COLS + ${3:-0})) # frame buffer index
+  # Draw current score
+  strary $1 ary
+  for ch in "${ary[@]}"; do
+    fb[fbi+0]=${sprite[ch]:0:1}
+    fb[fbi+1]=${sprite[ch]:1:1}
+    fb[fbi+2]=${sprite[ch]:2:1}
+    fb[fbi+0+COLS]=${sprite[ch]:3:1}
+    fb[fbi+1+COLS]=${sprite[ch]:4:1}
+    fb[fbi+2+COLS]=${sprite[ch]:5:1}
+    fb[fbi+0+COLS*2]=${sprite[ch]:6:1}
+    fb[fbi+1+COLS*2]=${sprite[ch]:7:1}
+    fb[fbi+2+COLS*2]=${sprite[ch]:8:1}
+    ((fbi+=3))
+  done
+}
+
+function plotBorder { # Draw a blue border around the framebuffer
+  local i
+  for i in $(range COLS-0); do
+    fb[i]="\e[44m \e[0m"
+    fb[(ROWS-1)*COLS+i]="\e[40m \e[0m"
+  done
+  for i in $(range 1 ROWS-2); do
+    fb[i*COLS]="\e[44m \e[0m"
+    fb[i*COLS+COLS-1]="\e[44m \e[0m"
+  done
+}
+
+p2=0 # player 2 exists?
+ps=(0 0) # player scores
+
+arraynew pp $((COLS/4-2)) 2 # player position
+
+pd=(0 0) # player direction
+power=1
+mypid=$$
+
+gravity=1 # gravity
+bc=1 # ball count
+bk=0 # dead balls
+arraynew ba 1 $bc # ball alive?
+
+#ball glyph
+arraynew bg '\e[4$((i++%%7+5))m \e[0m' $bc
+
+# ball direction vector
+#arraynew bd '$((RANDOM%%6))' $bc
+arraynew bvx 20 $bc
+arraynew bvy 10 $bc
+
+# ball location
+arraynew bx $((10*COLS/2-80)) $bc
+arraynew by $((10*ROWS/2+80)) $bc
+
+function hitHorizontal {
+  local y=$1 x=$2 p
+
+  # Hit the floor?
+  (( ROWS-1 == y )) && return 0
+
+  # Hit a paddle?
+  for px in "${pp[@]}"; do
+    (( ROWS-3==y && px*2<=x && x<=px*2+9 )) && return 0
+  done
+
+  # Hit top of wall?
+  (( ROWS-11==$y && (COLS/2==$x || COLS/2+1==$x))) && return 0
+
+  return 1
+}
+
+function hitVertical {
+  local y=$1 x=$2
+
+  (( COLS-1 == x )) && return 0 # Hit right wall, reverse direction
+
+  (( 0 == x )) && return 0 # Hit left wall, reverse direction
+
+  # Hit side of wall?
+  for wy in {2..11}; do
+    (( (ROWS-wy == y) && ((COLS/2==x) || (COLL/2+1==x)) )) && return 0
+  done
+
+  return 1
+}
+
+function plotBall {
+  local i y x ly lx fy fx hit
+
+  for i in $(range $bc); do # over ball count
+    if (( ba[i] )); then # ball alive
+      ((y=by[i], x=bx[i])) # current ball location
+      ((fy=y+bvy[i], fx=x+bvx[i])) # Final/desired ball location (add velocity vector)
+      (( y=y/10, x=x/10 ))
+
+      fb[y*COLS+x]=${bg[i]}
+      (( ly=y, lx=x ))
+
+      for d in $( linewalk $y $x $((fy/10)) $((fx/10)) ); do
+        (( y+=iy[d], x+=ix[d] )) # Consider next location
+        if [ "${fb[y*COLS+x]}" != ' ' ]; then # No collision
+          ((hit=1, fy=ly*10, fx=lx*10))
+          break
+        else # Draw it and continue
+          fb[y*COLS+x]=${bg[i]}
+          (( ly=y, lx=x ))
+        fi
+      done
+
+      # y x is the hit spot
+
+      if (( hit )) && hitHorizontal $y $x; then # hit floor, reverse up and adjust horizontal
+        (( bvy[i]*=-1, bvx[i]+=3*pd[0] ))
+      fi
+
+      if (( hit )) && hitVertical $y $x; then
+        (( bvx[i]*=-1 ))
+      fi
+
+      if (( hit && y == ROWS-1 )); then # handle scoring
+        if (( x < COLS/2 )); then
+          (( ps[1]++, fx=10*COLS/2, fy=10*(ROWS-11) ))
+        elif (( COLS/2+1 < x )); then
+          (( ps[0]++, fx=10*COLS/2, fy=10*(ROWS-11) ))
+        fi
+      fi
+
+      (( by[i]=fy, bx[i]=fx, bvy[i]+=gravity))
+    fi # ball alive
+  done
+
+}
+
+
+###############################################################################
+# Star field
+sfc=20
+arraynew sfx '$((RANDOM %% COLS))' $sfc
+arraynew sfy '$((RANDOM %% ROWS))' $sfc
+arraynew sfi '$((RANDOM %% 2))' $sfc
+sfcm=('\e[34m.' '\e[37m.')
+
+function plotStars {
+  local i=$sfc c
+  while ((i--)); do
+    ((c=sfi[i]))
+    (( ROWS <= (sfy[i]+=c+1) )) && ((sfy[i]=0, sfx[i]=RANDOM % COLS))
+    fb[sfx[i]+sfy[i]*COLS]="${sfcm[c]}\e[0m"
+  done
+}
+
+function plotText {
+  local IFS='' x=$1 y=$2 pre=$3 d
+  shift 3
+  (( d=x+y*COLS ))
+  strary "$*" ary
+  for n in "${ary[@]}"; do
+    fb[d++]="$pre$n\e[0m"
+  done
+}
+
+function plotGameover {
+  (( bc - bk )) && return
+  plotText $((COLS/2-8)) $((ROWS/2))   "\e[1m" "Thy Game Is Over"
+  plotText $((COLS/2-11)) $((ROWS/2+2)) "\e[0m" "(press 'q' to continue)"
+}
+
+framecount=0
+function plotFramerate {
+  (( framerate = ++framecount / SECONDS ))
+  plotText COLS-${#framerate} 0 '\e[44;1;34m' "$framerate"
+}
+##############################################################################*
+# The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
+
+function trapInthandler {
+  local key p
+  ((power)) || return
+  ## Player 2
+  read -n 1 -u 3 key
+  case "$key" in
+    (2) p2=1 ;;
+    (l) ((pd[1]=-1)) ;;
+    (r) ((pd[1]=1)) ;;
+  esac
+  initScreen || initfb
+  clearfb
+  plotStars
+  plotBorder
+  plotNum ${ps[0]} 1 1
+  plotNum ${ps[1]} 1 "$COLS-${#pp[1]}*4"
+  plotWall 10
+  plotPaddle ${pp[1]} $'\e[43m '
+  plotPaddle ${pp[0]} $'\e[47m '
+  plotBall
+  plotGameover
+  plotFramerate
+  fbRender
+
+  for p in $(range 2); do # if direction changed, update player position and clear direction
+    ((pd[p])) && ((pp[p]+=pd[p], pd[p]=0))
+    ((pp[p] < 0)) && pp[p]=0
+    (( COLS/2-4 < pp[p])) && ((pp[p]=COLS/2-4))
+  done
+
+  if ((scheduler)); then # MacOS Bash scheduling
+    sleep .02
+    kill -s 30 $mypid 2>/dev/null
+  fi &  # Reschedule renderer
+}
+
+trap trapInthandler 30
+
+function server {
+  rm /tmp/tennibash* 2>/dev/null
+  local key
+  exec 4>$IPCP1 3<$IPCP1
+  p "\e[?25l" # disable cursor
+  stty raw -echo
+  kill -s 30 $mypid # Scheduler renderer
+  while (( power && i < 10000 )); do # number of times to loop
+    ## Player 1
+    if ((scheduler)); then
+      # MacOS Bash scheduling
+      read -n 1 -s key
+    else
+      # Latest Linux Bash scheduling
+      read -t .02 -n 1 -s key
+      kill -s 30 $mypid 2>/dev/null
+    fi
+    case "$key" in
+      (h|D) ((pd[0]=-1)) ;;
+      (l|C) ((pd[0]=1)) ;;
+      (q) ((power=0)) ;;
+    esac
+  done
+  p "\e[?25h\e[${ROWS}H" # enable cursor
+  stty cooked echo
+  rm $IPCP1 $IPCFB 2>/dev/null
+  sleep .2
+}
+
+function client {
+  touch $IPCFB # Create FrameBuffer IPC file for server.
+  exec 3>>$IPCP1 # open comm with server
+  echo -en 2 >&3 # Announce to server player 2 is here
+  p "\e[?25l" # disable cursor
+  stty raw -echo
+  tail -f $IPCFB & # start rendering the field process
+  local key cid=$! # keep track of rendering PID
+  while (( power && i < 10000 )); do
+    read -n 1 -s key
+    case "$key" in
+      (h|D) echo -en l >&3 ;;
+      (l|C) echo -en r >&3 ;;
+      (q) ((power=0)); echo -en q >&3 ;;
+    esac
+  done
+  p "\e[?25h\e[${ROWS}H" # enable cursor
+  stty cooked echo
+  kill $cid # kill rendering process
+}
+
+if [ -f $IPCP1 ]; then
+  client
+  else
+  server
+fi

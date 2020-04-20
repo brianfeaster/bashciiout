@@ -429,6 +429,12 @@ function plotGameover {
   plotText $((COLS/2-11)) $((ROWS/2+2)) "\e[0m" "(press 'q' to continue)"
 }
 
+framecount=0
+function plotFramerate {
+  ((framerate = framecount++/SECONDS))
+  plotText 0 0 '' "$framerate FPS"
+}
+
 ##############################################################################*
 # The beauty of signal handlers in bash is they are evaluated in the same process as the trap call.
 
@@ -450,6 +456,7 @@ function trapInthandler {
   plotBricks # should plot bricks after plotBall as it might remove a brick or two
   plotBall
   plotGameover
+  plotFramerate
   fbRender
   if ((pd[0])); then # if direction changed, update player position and clear direction
     ((pp[0]+=pd[0], pd[0]=0))
