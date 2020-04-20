@@ -7,6 +7,7 @@ scheduler=${1:-0}
 # Files used for interprocess communication
 IPCFB=/tmp/tennibashfb # shared framebuffer
 IPCP1=/tmp/tennibashp1 # commands from player 1
+IPCLOG=/tmp/tennibashlog
 
 ###############################################################################
 # Helpers
@@ -30,6 +31,10 @@ function strary {
 
 function randomstring {
   printf $(eval printf '\\\\\x%2x' $(printf '%.s$((RANDOM%%95+32)) '  {1..40}))
+}
+
+function log {
+  printf "$*\n" 1>&5
 }
 
 ###############################################################################
@@ -103,7 +108,7 @@ function linewalk { #bresenham walk from two points
   fi
   ((y=y+y, e=y-x, yx=y-x-x))
   while ((0 < x)); do
-    echo $(( --x, (0 < e) ? (e+=yx, inc) : (e+=y, st) ))
+    echo -n "$(( --x, (0 < e) ? (e+=yx, inc) : (e+=y, st) )) "
   done
 }
 
@@ -117,13 +122,24 @@ function drawSteps {
   done
 }
 
-function plotWall () {
+fencecolor=0
+function plotFence () {
   local fbi=$(( (ROWS-2)*COLS + COLS/2)) height=$1
+  local color=('\e[40m \e[0m'  '\e[41m \e[0m'  '\e[43m \e[0m'  '\e[40m \e[0m'  '\e[41m \e[0m'  '\e[43m \e[0m')
   while ((height--)); do
-    fb[fbi]='\e[37;41m#\e[0m'
-    fb[fbi+1]='\e[37;41m#\e[0m'
+    fb[fbi]="${color[(fencecolor++%6)]}" # '\e[31;1;40m+\e[0m'
+    fb[fbi+1]="${color[(fencecolor++%6)]}" # '\e[31;1;40m+\e[0m'
    ((fbi-=COLS))
+  #fb[fbi-2]='\e[37;41m#\e[0m' # 84115
+  #fb[fbi-1]='\e[37;41m#\e[0m'
+  #fb[fbi+2]='\e[37;41m#\e[0m'
+  #fb[fbi+3]='\e[37;41m#\e[0m'
+  #fb[fbi-2-COLS]='\e[37;41m#\e[0m'
+  #fb[fbi-1-COLS]='\e[37;41m#\e[0m'
+  #fb[fbi+2-COLS]='\e[37;41m#\e[0m'
+  #fb[fbi+3-COLS]='\e[37;41m#\e[0m'
   done
+  ((fencecolor-=1))
 }
 
 function plotPaddle {
@@ -153,18 +169,19 @@ sadd sprite[9] ' _ ' '|_|' ' _|'
 
 function plotNum () {
   local str=$1 ary fbi=$((${2:-0}*COLS + ${3:-0})) # frame buffer index
+  local c=$4
   # Draw current score
   strary $1 ary
   for ch in "${ary[@]}"; do
-    fb[fbi+0]=${sprite[ch]:0:1}
-    fb[fbi+1]=${sprite[ch]:1:1}
-    fb[fbi+2]=${sprite[ch]:2:1}
-    fb[fbi+0+COLS]=${sprite[ch]:3:1}
-    fb[fbi+1+COLS]=${sprite[ch]:4:1}
-    fb[fbi+2+COLS]=${sprite[ch]:5:1}
-    fb[fbi+0+COLS*2]=${sprite[ch]:6:1}
-    fb[fbi+1+COLS*2]=${sprite[ch]:7:1}
-    fb[fbi+2+COLS*2]=${sprite[ch]:8:1}
+    fb[fbi+0]="\e[3${c}m${sprite[ch]:0:1}\e[0m"
+    fb[fbi+1]="\e[3${c}m${sprite[ch]:1:1}\e[0m"
+    fb[fbi+2]="\e[3${c}m${sprite[ch]:2:1}\e[0m"
+    fb[fbi+0+COLS]="\e[3${c}m${sprite[ch]:3:1}\e[0m"
+    fb[fbi+1+COLS]="\e[3${c}m${sprite[ch]:4:1}\e[0m"
+    fb[fbi+2+COLS]="\e[3${c}m${sprite[ch]:5:1}\e[0m"
+    fb[fbi+0+COLS*2]="\e[3${c}m${sprite[ch]:6:1}\e[0m"
+    fb[fbi+1+COLS*2]="\e[3${c}m${sprite[ch]:7:1}\e[0m"
+    fb[fbi+2+COLS*2]="\e[3${c}m${sprite[ch]:8:1}\e[0m"
     ((fbi+=3))
   done
 }
@@ -172,12 +189,19 @@ function plotNum () {
 function plotBorder { # Draw a blue border around the framebuffer
   local i
   for i in $(range COLS-0); do
-    fb[i]="\e[44m \e[0m"
-    fb[(ROWS-1)*COLS+i]="\e[40m \e[0m"
+    fb[i]="\e[44m \e[0m" # top border
+    #fb[(ROWS-1)*COLS+i]="\e[40m \e[0m" # bottom border
   done
   for i in $(range 1 ROWS-2); do
-    fb[i*COLS]="\e[44m \e[0m"
-    fb[i*COLS+COLS-1]="\e[44m \e[0m"
+    fb[i*COLS]="\e[44m \e[0m" # left border
+    fb[i*COLS+COLS-1]="\e[44m \e[0m" # right border
+  done
+}
+
+function plotFire {
+  local flames=('_' '_' '-' '-' '=' '\e[33m=' "\e[1;33m^")
+  for i in $(range COLS-0); do
+    fb[(ROWS-1)*COLS+i]="\e[31m${flames[RANDOM%7]}\e[0m" # bottom border
   done
 }
 
@@ -200,12 +224,12 @@ arraynew bg '\e[4$((i++%%7+5))m \e[0m' $bc
 
 # ball direction vector
 #arraynew bd '$((RANDOM%%6))' $bc
-arraynew bvx 20 $bc
+arraynew bvx 10 $bc
 arraynew bvy 10 $bc
 
-# ball location
-arraynew bx $((10*COLS/2-80)) $bc
-arraynew by $((10*ROWS/2+80)) $bc
+# ball location in the fixedpoint frame
+arraynew by $(( 10*(ROWS/4) )) $bc
+arraynew bx $(( 10*(COLS/4) )) $bc
 
 function hitHorizontal {
   local y=$1 x=$2 p
@@ -231,38 +255,38 @@ function hitVertical {
 
   (( 0 == x )) && return 0 # Hit left wall, reverse direction
 
-  # Hit side of wall?
+  # Hit side of net
   for wy in {2..11}; do
-    (( (ROWS-wy == y) && ((COLS/2==x) || (COLL/2+1==x)) )) && return 0
+    (( (ROWS-wy == y) && ((COLS/2==x) || (COLS/2+1==x)) )) && return 0
   done
 
   return 1
 }
 
 function plotBall {
-  local i y x ly lx fy fx hit
+  local i y x ly lx fy fx hit g="\e[4$((RANDOM%7+1))m \e[0m"
 
   for i in $(range $bc); do # over ball count
     if (( ba[i] )); then # ball alive
       ((y=by[i], x=bx[i])) # current ball location
       ((fy=y+bvy[i], fx=x+bvx[i])) # Final/desired ball location (add velocity vector)
+
+
       (( y=y/10, x=x/10 ))
-
-      fb[y*COLS+x]=${bg[i]}
-      (( ly=y, lx=x ))
-
       for d in $( linewalk $y $x $((fy/10)) $((fx/10)) ); do
+        fb[y*COLS+x]=$g # ${bg[i]}
+        (( ly=y, lx=x ))
+
         (( y+=iy[d], x+=ix[d] )) # Consider next location
         if [ "${fb[y*COLS+x]}" != ' ' ]; then # No collision
           ((hit=1, fy=ly*10, fx=lx*10))
           break
-        else # Draw it and continue
-          fb[y*COLS+x]=${bg[i]}
-          (( ly=y, lx=x ))
         fi
       done
 
-      # y x is the hit spot
+      # y/x is where ball looked last       (screen coordindates)
+      # fy/fx is where the ended up
+
 
       if (( hit )) && hitHorizontal $y $x; then # hit floor, reverse up and adjust horizontal
         (( bvy[i]*=-1, bvx[i]+=3*pd[0] ))
@@ -274,9 +298,9 @@ function plotBall {
 
       if (( hit && y == ROWS-1 )); then # handle scoring
         if (( x < COLS/2 )); then
-          (( ps[1]++, fx=10*COLS/2, fy=10*(ROWS-11) ))
+          (( ps[1]++, fx=10*COLS/2, fy=10*(ROWS-12), bvy[i]=-10 ))
         elif (( COLS/2+1 < x )); then
-          (( ps[0]++, fx=10*COLS/2, fy=10*(ROWS-11) ))
+          (( ps[0]++, fx=10*COLS/2, fy=10*(ROWS-12), bvy[i]=-10 ))
         fi
       fi
 
@@ -342,21 +366,29 @@ function trapInthandler {
   clearfb
   plotStars
   plotBorder
-  plotNum ${ps[0]} 1 1
-  plotNum ${ps[1]} 1 "$COLS-${#pp[1]}*4"
-  plotWall 10
-  plotPaddle ${pp[1]} $'\e[43m '
-  plotPaddle ${pp[0]} $'\e[47m '
+  plotFence 10
+  plotFire
+  plotPaddle ${pp[0]} $'\e[44m '
+  plotPaddle ${pp[1]} $'\e[46m '
   plotBall
+  plotNum ${ps[0]} 1 1 4
+  plotNum ${ps[1]} 1 "$COLS-${#pp[1]}*4" 6
   plotGameover
   plotFramerate
   fbRender
+  #read -n 1 power
 
   for p in $(range 2); do # if direction changed, update player position and clear direction
     ((pd[p])) && ((pp[p]+=pd[p], pd[p]=0))
+
     ((pp[p] < 0)) && pp[p]=0
-    (( COLS/2-4 < pp[p])) && ((pp[p]=COLS/2-4))
+    (( COLS/2-5 < pp[p])) && ((pp[p]=COLS/2-5))
+
   done
+
+  (( COLS/4-4 < pp[0] )) && (( pp[0]=COLS/4-4 ))
+  (( pp[1] < COLS/4+1 )) && (( pp[1]=COLS/4+1 ))
+
 
   if ((scheduler)); then # MacOS Bash scheduling
     sleep .02
@@ -367,9 +399,8 @@ function trapInthandler {
 trap trapInthandler 30
 
 function server {
-  rm /tmp/tennibash* 2>/dev/null
   local key
-  exec 4>$IPCP1 3<$IPCP1
+  exec 4>$IPCP1 3<$IPCP1 5>$IPCLOG
   p "\e[?25l" # disable cursor
   stty raw -echo
   kill -s 30 $mypid # Scheduler renderer
