@@ -4,10 +4,11 @@
 ## How to play
 
 - There are two games current:
- - brickout
- - tennibash
+  - brickout
+  - tennibash
 - Run the game of choice in your shell.  IE: `./brickout` or `./tennibash`
- - Some versions of Bash are buggy (old Macbook Pros / Bash 3.2) If so pass the scripts argument `1` IE: `./brickout 1`
+  - Some versions of Bash are buggy (old Macbook Pros / Bash 3.2) If so pass the scripts argument `1` IE: `./brickout 1`
+- Player 2 can play by running the script as well.  Must be on the same machine/filesystem.
 - Move left 'h' or right 'l'
 - Quit/Exit 'q'
 
