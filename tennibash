@@ -3,6 +3,7 @@
 # scheduler 0 should work on more recent Bash
 # scheduler 1 should work on old Bash / MacOS
 scheduler=${1:-0}
+FRAMEDELAY=.01
 
 # Files used for interprocess communication
 IPCFB=/tmp/tennibashfb # shared framebuffer
@@ -391,7 +392,7 @@ function trapInthandler {
 
 
   if ((scheduler)); then # MacOS Bash scheduling
-    sleep .02
+    sleep $FRAMEDELAY
     kill -s 30 $mypid 2>/dev/null
   fi &  # Reschedule renderer
 }
@@ -411,7 +412,7 @@ function server {
       read -n 1 -s key
     else
       # Latest Linux Bash scheduling
-      read -t .02 -n 1 -s key
+      read -t $FRAMEDELAY -n 1 -s key
       kill -s 30 $mypid 2>/dev/null
     fi
     case "$key" in
@@ -423,7 +424,7 @@ function server {
   p "\e[?25h\e[${ROWS}H" # enable cursor
   stty cooked echo
   rm $IPCP1 $IPCFB 2>/dev/null
-  sleep .2
+  sleep .5
 }
 
 function client {

@@ -3,10 +3,14 @@
 
 ## How to play
 
-- Run `brickout` in your shell (or `brickout 1` for older Bash/MacOS)
+- There are two games current:
+ - brickout
+ - tennibash
+- Run the game of choice in your shell.  IE: `./brickout` or `./tennibash`
+ - Some versions of Bash are buggy (old Macbook Pros / Bash 3.2) If so pass the scripts argument `1` IE: `./brickout 1`
 - Move left 'h' or right 'l'
 - Quit/Exit 'q'
 
-## Media
+![Brickout](https://raw.githubusercontent.com/brianfeaster/bashciiout/master/screenshot01.jpg)
 
-![screenshot](https://raw.githubusercontent.com/brianfeaster/bashciiout/master/screenshot01.jpg)
+![Tennibash](https://raw.githubusercontent.com/brianfeaster/bashciiout/master/screenshot02.jpg)
